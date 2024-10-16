@@ -20,7 +20,7 @@ pip install -r requirements.txt
 python manage.py migrate
 ``` 
 
-5. папке с файлом manage.py запустите сервер, выполнив команду:
+5. Запустите сервер, выполнив команду:
 
 ```
 python manage.py runserver
