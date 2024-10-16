@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+   <head>
+      <meta charset="UTF-8">
+      <title>Яндекс.Диск - Файлы</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+      <style>
+         body {
+         padding-top: 60px;
+         background-color: #f8f9fa;
+         }
+         .folder-icon {
+         color: #ffc107;
+         }
+         .file-icon {
+         color: #0d6efd;
+         }
+         .download-link {
+         margin-left: 10px;
+         }
+      </style>
+   </head>
+   <body>
+      <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+         <div class="container-fluid">
+            <a class="navbar-brand" href="{% url 'home' %}">Просмотр файлов</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+               aria-controls="navbarNav" aria-expanded="false" aria-label="Переключить навигацию">
+            <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+               <ul class="navbar-nav ms-auto">
+                  <li class="nav-item">
+                     <a class="nav-link" href="{% url 'auth_url' %}">Авторизация</a>
+                  </li>
+               </ul>
+            </div>
+         </div>
+      </nav>
+      <div class="container">
+         <div class="row">
+            <div class="col">
+               <h1 class="mb-4">Просмотр файлов на Яндекс.Диске</h1>
+            </div>
+         </div>
+         <div class="row">
+            <div class="col-md-8 offset-md-2">
+               <div class="card mb-4">
+                  <div class="card-body">
+                     <form method="post">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                           <label for="id_public_key" class="form-label">Публичная ссылка на Яндекс.Диск</label>
+                           {{ form.public_key }}
+                           {% if form.public_key.errors %}
+                           <div class="text-danger">
+                              {{ form.public_key.errors }}
+                           </div>
+                           {% endif %}
+                           <div class="form-text">Введите действительную публичную ссылку на Яндекс.Диск.</div>
+                        </div>
+                        <div class="mb-3">
+                           <label for="id_file_type" class="form-label">Тип файлов</label>
+                           {{ form.file_type }}
+                           {% if form.file_type.errors %}
+                           <div class="text-danger">
+                              {{ form.file_type.errors }}
+                           </div>
+                           {% endif %}
+                        </div>
+                        <button type="submit" class="btn btn-primary">Получить</button>
+                     </form>
+                  </div>
+               </div>
+            </div>
+         </div>
+         {% if messages %}
+         <div class="row">
+            <div class="col-md-8 offset-md-2">
+               {% for message in messages %}
+               <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                  {{ message }}
+                  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Закрыть"></button>
+               </div>
+               {% endfor %}
+            </div>
+         </div>
+         {% endif %}
+         {% if files %}
+         <div class="row">
+            <div class="col-md-12">
+               <h2 class="mb-3">Список файлов:</h2>
+               <form method="post" action="{% url 'download_files' %}">
+                  {% csrf_token %}
+                  <div class="card">
+                     <div class="card-body">
+                        <ul class="list-group mb-3">
+                           {% for file in files %}
+                           <li class="list-group-item d-flex align-items-center">
+                              {% if file.type == 'dir' %}
+                              <i class="bi bi-folder-fill folder-icon me-2"></i>
+                              <span class="fw-bold">{{ file.name }}</span>
+                              {% elif file.type == 'file' %}
+                              <input class="form-check-input me-2" type="checkbox" name="files" value="{{ file.file }}" id="file{{ forloop.counter }}">
+                              <label class="form-check-label flex-grow-1" for="file{{ forloop.counter }}">
+                              <i class="bi bi-file-earmark-fill file-icon me-2"></i>{{ file.name }}
+                              </label>
+                              <a class="btn btn-sm btn-outline-primary download-link" href="{{ file.file }}" target="_blank">
+                              <i class="bi bi-download"></i> Скачать
+                              </a>
+                              {% else %}
+                              <span>{{ file.name }} (Неизвестный тип)</span>
+                              {% endif %}
+                           </li>
+                           {% endfor %}
+                        </ul>
+                        <button type="submit" class="btn btn-success">Скачать выбранные файлы</button>
+                     </div>
+                  </div>
+               </form>
+            </div>
+         </div>
+         {% elif request.method == 'POST' %}
+         <div class="row">
+            <div class="col-md-8 offset-md-2">
+               <div class="alert alert-warning" role="alert">
+                  Файлы не найдены.
+               </div>
+            </div>
+         </div>
+         {% endif %}
+      </div>
+      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+   </body>
+</html>
