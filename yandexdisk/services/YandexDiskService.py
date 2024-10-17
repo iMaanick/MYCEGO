@@ -8,39 +8,19 @@ from django.http import HttpRequest
 class YandexDiskService:
     """Service for interaction with Yandex.Disk API."""
 
-    TOKEN_URL = 'https://oauth.yandex.ru/token'
     PUBLIC_RESOURCES_URL = 'https://cloud-api.yandex.net/v1/disk/public/resources'
 
-    def __init__(self, client_id: str, client_secret: str):
-        self.client_id = client_id
-        self.client_secret = client_secret
+    def __init__(self, token: str) -> None:
+        self.token = token
 
-    def get_token(self, code: str) -> Optional[str]:
-        """Get an access token."""
-        data = {
-            'grant_type': 'authorization_code',
-            'code': code,
-            'client_id': self.client_id,
-            'client_secret': self.client_secret,
-        }
-        try:
-            response = requests.post(self.TOKEN_URL, data=data)
-            response.raise_for_status()
-            token = response.json().get('access_token', None)
-            if isinstance(token, str):
-                return token
-            return None
-        except requests.RequestException:
-            return None
-
-    def get_public_resources(self, token: str, public_key: str) -> Optional[List[Dict]]:
+    def get_public_resources(self, public_key: str) -> Optional[List[Dict]]:
         """Gets a list of public resources by public_key."""
         cache_key = self._generate_cache_key(public_key)
         cached_resources = cache.get(cache_key)
         if cached_resources is not None:
             return cached_resources
 
-        headers = {'Authorization': f'OAuth {token}'}
+        headers = {'Authorization': f'OAuth {self.token}'}
         params = self._build_public_resources_params(public_key)
 
         try:

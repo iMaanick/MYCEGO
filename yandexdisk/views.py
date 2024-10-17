@@ -1,6 +1,6 @@
 import io
 import zipfile
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from urllib.parse import urlparse, parse_qs
 
@@ -9,87 +9,90 @@ from django.shortcuts import render, redirect
 from django.http import HttpResponse, HttpRequest
 from django.urls import reverse
 from django.views import View
+from requests_oauthlib import OAuth2Session
 
-from .forms import AuthForm, TokenForm, PublicLinkForm, FileType
+from djangoMYCEGO import settings
+from .forms import PublicLinkForm, FileType
 from .services.YandexDiskService import YandexDiskService
 
 
-class AuthUrlView(View):
-    """View for handling authorization URLs."""
-
-    template_name = 'disk/auth_url.html'
+class LoginView(View):
+    """
+    View for displaying the login button and initiating OAuth authorization.
+    """
+    template_name = 'disk/login.html'
 
     def get(self, request: HttpRequest) -> HttpResponse:
-        form = AuthForm()
-        return render(request, self.template_name, {'form': form})
+        return render(request, self.template_name)
 
     def post(self, request: HttpRequest) -> HttpResponse:
-        form = AuthForm(request.POST)
-        if form.is_valid():
-            client_id = form.cleaned_data['client_id']
-            client_secret = form.cleaned_data['client_secret']
-            self._save_credentials_to_session(request, client_id, client_secret)
-            return redirect(reverse('auth_token'))
-        return render(request, self.template_name, {'form': form})
+        oauth = OAuth2Session(
+            client_id=settings.YANDEX_DISK_CLIENT_ID,
+            redirect_uri=settings.YANDEX_DISK_REDIRECT_URI
+        )
+        authorization_url, state = oauth.authorization_url(settings.YANDEX_DISK_AUTH_URL)
 
-    @staticmethod
-    def _save_credentials_to_session(request: HttpRequest, client_id: str, client_secret: str) -> None:
-        """Save the client ID and secret in the session."""
-        request.session['client_id'] = client_id
-        request.session['client_secret'] = client_secret
+        request.session['oauth_state'] = state
+
+        return redirect(authorization_url)
 
 
 class AuthTokenView(View):
-    """A view for exchanging an authorization code for a token."""
-
+    """
+    A view to handle OAuth authentication with Yandex Disk using requests-oauthlib.
+    Initiates the OAuth flow and handles the callback to exchange code for token.
+    """
     template_name = 'disk/auth_token.html'
 
     def get(self, request: HttpRequest) -> HttpResponse:
-        form = TokenForm()
-        return render(request, self.template_name, {'form': form})
+        code = request.GET.get('code')
 
-    def post(self, request: HttpRequest) -> HttpResponse:
-        form = TokenForm(request.POST)
-        if form.is_valid():
-            code = form.cleaned_data['code']
-            client_id = request.session.get('client_id')
-            client_secret = request.session.get('client_secret')
+        if not code:
+            return redirect('login')
 
-            if not self._has_credentials(client_id, client_secret):
-                return redirect(reverse('auth_url'))
-
-            yandex_service = YandexDiskService(client_id, client_secret)
-            token = yandex_service.get_token(code)
-
-            if token:
-                request.session['yandex_disk_token'] = token
-                return redirect(reverse('home'))
-            else:
-                form.add_error(None, 'Ошибка получения токена')
-        return render(request, self.template_name, {'form': form})
+        try:
+            token = self._exchange_code_for_token(request, code)
+            request.session['yandex_disk_token'] = token
+            return render(request, self.template_name)
+        except Exception as e:
+            return render(request, self.template_name, {'error': f'Ошибка при получении токена: {str(e)}'})
 
     @staticmethod
-    def _has_credentials(client_id: Optional[str], client_secret: Optional[str]) -> bool:
-        """Checks if there is a client_id and client_secret."""
-        return bool(client_id and client_secret)
+    def _exchange_code_for_token(request: HttpRequest, code: str) -> str:
+        """
+        Exchanges an authorization code for an access token using requests-oauthlib.
+        """
+        oauth = OAuth2Session(
+            client_id=settings.YANDEX_DISK_CLIENT_ID,
+            redirect_uri=settings.YANDEX_DISK_REDIRECT_URI,
+            state=request.session.get('oauth_state')
+        )
+
+        token = oauth.fetch_token(
+            token_url=settings.YANDEX_DISK_TOKEN_URL,
+            code=code,
+            client_secret=settings.YANDEX_DISK_CLIENT_SECRET
+        )
+        return token.get('access_token')
 
 
 class HomeView(View):
-    """View for displaying files from a public link."""
-
+    """
+    View for displaying files from a public link.
+    """
     template_name = 'disk/home.html'
 
     def get(self, request: HttpRequest) -> HttpResponse:
         token = YandexDiskService.get_yandex_disk_token(request)
         if not token:
-            return redirect(reverse('auth_url'))
+            return redirect(reverse('login'))
         form = PublicLinkForm()
         return render(request, self.template_name, {'form': form, 'files': []})
 
     def post(self, request: HttpRequest) -> HttpResponse:
         token = YandexDiskService.get_yandex_disk_token(request)
         if not token:
-            return redirect(reverse('auth_url'))
+            return redirect(reverse('login'))
 
         form = PublicLinkForm(request.POST)
         files = []
@@ -99,10 +102,9 @@ class HomeView(View):
             file_type = form.cleaned_data.get('file_type', 'all')
 
             yandex_service = YandexDiskService(
-                client_id=request.session.get('client_id', ''),
-                client_secret=request.session.get('client_secret', '')
+                token=token
             )
-            resources = yandex_service.get_public_resources(token, public_key)
+            resources = yandex_service.get_public_resources(public_key)
 
             if resources is not None:
                 files = self._filter_files(resources, file_type)
@@ -113,7 +115,9 @@ class HomeView(View):
 
     @staticmethod
     def _filter_files(files: List[Dict], file_type: str) -> List[Dict]:
-        """Filters files by type."""
+        """
+        Filters files by type.
+        """
         if file_type == FileType.ALL:
             return files
         mime_prefix = FileType.get_mime_prefix(file_type)
@@ -124,12 +128,14 @@ class HomeView(View):
 
 
 class DownloadFilesView(View):
-    """View for downloading selected files."""
+    """
+    View for downloading selected files.
+    """
 
     def post(self, request: HttpRequest) -> HttpResponse:
         token = YandexDiskService.get_yandex_disk_token(request)
         if not token:
-            return redirect(reverse('auth_url'))
+            return redirect(reverse('login'))
 
         file_urls = request.POST.getlist(key='files')
         if not file_urls:
@@ -143,7 +149,9 @@ class DownloadFilesView(View):
 
     @staticmethod
     def _create_zip_archive(file_urls: List[str]) -> io.BytesIO:
-        """Creates a ZIP archive from the specified files."""
+        """
+        Creates a ZIP archive from the specified files.
+        """
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, 'w') as zip_file:
             for file_url in file_urls:
@@ -157,7 +165,9 @@ class DownloadFilesView(View):
 
     @staticmethod
     def _extract_filename(file_url: str) -> str:
-        """Extracts the file name from a URL."""
+        """
+        Extracts the file name from a URL.
+        """
         parsed_url = urlparse(file_url)
         query_params = parse_qs(parsed_url.query)
         filename = query_params.get('filename', ['downloaded_file'])[0]
@@ -165,7 +175,9 @@ class DownloadFilesView(View):
 
     @staticmethod
     def _build_zip_response(zip_buffer: io.BytesIO) -> HttpResponse:
-        """Builds an HTTP response with a ZIP archive."""
+        """
+        Builds an HTTP response with a ZIP archive.
+        """
         response = HttpResponse(zip_buffer.read(), content_type='application/zip')
         response['Content-Disposition'] = 'attachment; filename=downloaded_files.zip'
         return response
