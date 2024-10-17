@@ -110,7 +110,6 @@ class HomeView(View):
                 files = self._filter_files(resources, file_type)
             else:
                 form.add_error(None, 'Ошибка получения данных с Яндекс.Диска')
-
         return render(request, self.template_name, {'form': form, 'files': files})
 
     @staticmethod
